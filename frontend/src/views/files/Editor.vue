@@ -170,7 +170,10 @@ const initCherry = (content: string) => {
     id: "cherry-container",
     value: content,
     editor: { defaultModel: editorMode.value },
-    toolbars: { showToolbar: true },
+    toolbars: {
+      showToolbar: true,
+      toc: { defaultModel: "full", updateLocationHash: false },
+    },
   });
   setTimeout(updateFontSize, 0);
 };
@@ -184,9 +187,26 @@ const destroyCherry = () => {
   }
 };
 
+const handleCherryClick = (e: MouseEvent) => {
+  const target = e.target as HTMLElement;
+  const anchor = target.closest("a[href]");
+  if (!anchor) return;
+  const href = anchor.getAttribute("href");
+  if (!href || !href.startsWith("#")) return;
+  e.preventDefault();
+  const id = href.slice(1);
+  const el = document.getElementById(id);
+  if (el) {
+    el.scrollIntoView({ behavior: "smooth" });
+  }
+};
+
 onMounted(() => {
   window.addEventListener("keydown", keyEvent);
   window.addEventListener("beforeunload", handlePageChange);
+
+  const cherryContainer = document.getElementById("cherry-container");
+  cherryContainer?.addEventListener("click", handleCherryClick);
 
   const fileContent = fileStore.req?.content || "";
 
@@ -212,6 +232,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", keyEvent);
   window.removeEventListener("beforeunload", handlePageChange);
+  document
+    .getElementById("cherry-container")
+    ?.removeEventListener("click", handleCherryClick);
   destroyCherry();
   editor.value?.destroy();
 });
