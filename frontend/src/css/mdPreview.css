@@ -1,11 +1,8 @@
-#preview-container {
-  overflow: auto;
+#cherry-container {
   flex: 1;
 }
 
-/* Cherry Markdown previewer adapts to FileBrowser layout */
-#preview-container .cherry-previewer {
-  padding: 1rem;
-  font-size: 16px;
-  line-height: 1.6;
+#cherry-container .cherry-editor,
+#cherry-container .cherry-previewer {
+  flex: 1;
 }

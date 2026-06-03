@@ -25,10 +25,10 @@
       />
 
       <action
+        v-if="isMarkdownFile"
         icon="preview"
-        :label="t('buttons.preview')"
-        @action="preview()"
-        v-show="isMarkdownFile"
+        :label="modeToggleLabel"
+        @action="toggleMode()"
       />
     </header-bar>
 
@@ -67,11 +67,10 @@
       </div>
 
       <div
-        v-show="isPreview && isMarkdownFile"
-        id="preview-container"
-        class="md_preview"
+        v-show="isMarkdownFile"
+        id="cherry-container"
       ></div>
-      <form v-show="!isPreview || !isMarkdownFile" id="editor"></form>
+      <form v-show="!isMarkdownFile" id="editor"></form>
     </template>
   </div>
 </template>
@@ -93,7 +92,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useFileStore } from "@/stores/file";
 import { useLayoutStore } from "@/stores/layout";
 import { getEditorTheme } from "@/utils/theme";
-import { inject, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import { read, copy } from "@/utils/clipboard";
@@ -112,11 +111,18 @@ const router = useRouter();
 const editor = ref<Ace.Editor | null>(null);
 const cherryInstance = ref<any>(null);
 const fontSize = ref(parseInt(localStorage.getItem("editorFontSize") || "14"));
+const initialContent = ref("");
 
-const isPreview = ref(false);
+const editorMode = ref<"edit&preview" | "previewOnly">("previewOnly");
 const isMarkdownFile =
   fileStore.req?.name.endsWith(".md") ||
   fileStore.req?.name.endsWith(".markdown");
+
+const modeToggleLabel = computed(() => {
+  return editorMode.value === "previewOnly"
+    ? t("buttons.editAsText")
+    : t("buttons.preview");
+});
 
 const isSelectionEmpty = ref(true);
 
@@ -147,14 +153,26 @@ const executeEditorCommand = (name: string) => {
   editor.value?.execCommand(name);
 };
 
+const toggleMode = () => {
+  if (!cherryInstance.value) return;
+
+  const nextMode =
+    editorMode.value === "previewOnly" ? "edit&preview" : "previewOnly";
+  editorMode.value = nextMode;
+  cherryInstance.value.switchModel(nextMode);
+  setTimeout(updateFontSize, 0);
+};
+
 const initCherry = (content: string) => {
   destroyCherry();
+  initialContent.value = content;
   cherryInstance.value = new Cherry({
-    id: "preview-container",
+    id: "cherry-container",
     value: content,
-    editor: { defaultModel: "previewOnly" },
-    toolbars: { showToolbar: false },
+    editor: { defaultModel: editorMode.value },
+    toolbars: { showToolbar: true },
   });
+  setTimeout(updateFontSize, 0);
 };
 
 const destroyCherry = () => {
@@ -172,21 +190,6 @@ onMounted(() => {
 
   const fileContent = fileStore.req?.content || "";
 
-  watchEffect(() => {
-    if (isMarkdownFile && isPreview.value) {
-      const content = editor.value?.getValue() || "";
-      if (!cherryInstance.value) {
-        initCherry(content);
-        // Cherry renders asynchronously, defer font size application
-        setTimeout(updatePreviewFontSize, 0);
-      } else {
-        cherryInstance.value.setValue(content);
-      }
-    } else {
-      destroyCherry();
-    }
-  });
-
   ace.config.set(
     "basePath",
     `https://cdn.jsdelivr.net/npm/ace-builds@${ace_version}/src-min-noconflict/`
@@ -196,7 +199,6 @@ onMounted(() => {
     initEditor(fileContent);
   } else {
     const unwatch = watchEffect(() => {
-      // Initialize editor when layout is loaded
       if (!layoutStore.loading) {
         setTimeout(() => {
           initEditor(fileContent);
@@ -215,9 +217,8 @@ onBeforeUnmount(() => {
 });
 
 onBeforeRouteUpdate((to, from, next) => {
-  if (editor.value?.session.getUndoManager().isClean()) {
+  if (isClean()) {
     next();
-
     return;
   }
 
@@ -235,6 +236,14 @@ onBeforeRouteUpdate((to, from, next) => {
 });
 
 const initEditor = (fileContent: string) => {
+  if (isMarkdownFile) {
+    initCherry(fileContent);
+  } else {
+    initAceEditor(fileContent);
+  }
+};
+
+const initAceEditor = (fileContent: string) => {
   editor.value = ace.edit("editor", {
     value: fileContent,
     showPrintMargin: false,
@@ -274,12 +283,32 @@ const keyEvent = (event: KeyboardEvent) => {
 };
 
 const handlePageChange = (event: BeforeUnloadEvent) => {
-  if (!editor.value?.session.getUndoManager().isClean()) {
+  if (!isClean()) {
     event.preventDefault();
-    // returnValue is now depecrated, though keeping in for legacy browser support
-    // https://developer.mozilla.org/en-US/docs/Web/API/BeforeUnloadEvent/returnValue
     event.returnValue = true;
   }
+};
+
+const getContent = () => {
+  if (isMarkdownFile && cherryInstance.value) {
+    return cherryInstance.value.getValue();
+  }
+  return editor.value?.getValue() || "";
+};
+
+const markClean = () => {
+  if (isMarkdownFile && cherryInstance.value) {
+    initialContent.value = cherryInstance.value.getValue();
+  } else {
+    editor.value?.session.getUndoManager().markClean();
+  }
+};
+
+const isClean = () => {
+  if (isMarkdownFile && cherryInstance.value) {
+    return cherryInstance.value.getValue() === initialContent.value;
+  }
+  return editor.value?.session.getUndoManager().isClean() ?? true;
 };
 
 const save = async (throwError?: boolean) => {
@@ -287,8 +316,8 @@ const save = async (throwError?: boolean) => {
   buttons.loading("save");
 
   try {
-    await api.put(route.path, editor.value?.getValue());
-    editor.value?.session.getUndoManager().markClean();
+    await api.put(route.path, getContent());
+    markClean();
     buttons.success(button);
   } catch (e: any) {
     buttons.done(button);
@@ -297,19 +326,25 @@ const save = async (throwError?: boolean) => {
   }
 };
 
-const updatePreviewFontSize = () => {
+const updateFontSize = () => {
   const previewer = document.querySelector(
-    "#preview-container .cherry-previewer"
+    "#cherry-container .cherry-previewer"
   ) as HTMLElement | null;
   if (previewer) {
     previewer.style.fontSize = fontSize.value + "px";
+  }
+  const codeMirror = document.querySelector(
+    "#cherry-container .cherry-editor .CodeMirror"
+  ) as HTMLElement | null;
+  if (codeMirror) {
+    codeMirror.style.fontSize = fontSize.value + "px";
   }
 };
 
 const increaseFontSize = () => {
   fontSize.value += 1;
   editor.value?.setFontSize(fontSize.value);
-  updatePreviewFontSize();
+  updateFontSize();
   localStorage.setItem("editorFontSize", fontSize.value.toString());
 };
 
@@ -317,18 +352,22 @@ const decreaseFontSize = () => {
   if (fontSize.value > 1) {
     fontSize.value -= 1;
     editor.value?.setFontSize(fontSize.value);
-    updatePreviewFontSize();
+    updateFontSize();
     localStorage.setItem("editorFontSize", fontSize.value.toString());
   }
 };
 
 const close = () => {
-  if (!editor.value?.session.getUndoManager().isClean()) {
+  if (!isClean()) {
     layoutStore.showHover({
       prompt: "discardEditorChanges",
       confirm: (event: Event) => {
         event.preventDefault();
-        editor.value?.session.getUndoManager().reset();
+        if (isMarkdownFile && cherryInstance.value) {
+          cherryInstance.value.setValue(initialContent.value);
+        } else {
+          editor.value?.session.getUndoManager().reset();
+        }
         finishClose();
       },
       saveAction: async () => {
@@ -346,10 +385,6 @@ const close = () => {
 const finishClose = () => {
   const uri = url.removeLastDir(route.path) + "/";
   router.push({ path: uri });
-};
-
-const preview = () => {
-  isPreview.value = !isPreview.value;
 };
 </script>
 
