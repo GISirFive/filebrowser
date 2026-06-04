@@ -1,7 +1,11 @@
 package fbhttp
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -209,7 +213,114 @@ func rawDirHandler(w http.ResponseWriter, r *http.Request, d *data, file *files.
 	return 0, nil
 }
 
+func isMarkdownFile(name string) bool {
+	return strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".markdown")
+}
+
+var markdownPreviewTemplate = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%s</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cherry-markdown@0.11/dist/cherry-markdown.min.css">
+<style>
+html, body { margin: 0; padding: 0; height: 100%%; }
+</style>
+</head>
+<body>
+<div id="cherry-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/cherry-markdown@0.11/dist/cherry-markdown.min.js"></script>
+<script type="application/json" id="markdown-data">
+%s
+</script>
+<script>
+(function() {
+  var data = JSON.parse(document.getElementById('markdown-data').textContent);
+
+  function resolveCherryTheme() {
+    var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return {
+      themeList: [
+        { className: 'default', label: 'Default' },
+        { className: 'dark', label: 'Dark' }
+      ],
+      mainTheme: isDark ? 'dark' : 'default',
+      codeBlockTheme: isDark ? 'monokai' : 'default',
+      inlineCodeTheme: isDark ? 'black' : 'red'
+    };
+  }
+
+  var cherryInstance = null;
+  var currentMainTheme = null;
+
+  function initCherry() {
+    var theme = resolveCherryTheme();
+    if (cherryInstance && currentMainTheme !== theme.mainTheme) {
+      currentMainTheme = theme.mainTheme;
+      var wrapper = document.querySelector('#cherry-container .cherry');
+      if (wrapper) {
+        wrapper.classList.remove('theme__default', 'theme__dark');
+        wrapper.classList.add('theme__' + theme.mainTheme);
+      }
+      return;
+    }
+    if (cherryInstance) return;
+
+    currentMainTheme = theme.mainTheme;
+    cherryInstance = new Cherry({
+      id: 'cherry-container',
+      value: data.content,
+      editor: { defaultModel: 'previewOnly' },
+      toolbars: {
+        showToolbar: false,
+        toc: { defaultModel: 'full', updateLocationHash: false }
+      },
+      themeSettings: theme
+    });
+  }
+
+  initCherry();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', initCherry);
+})();
+</script>
+</body>
+</html>`
+
+func serveMarkdownPreview(w http.ResponseWriter, r *http.Request, file *files.FileInfo) (int, error) {
+	fd, err := file.Fs.Open(file.Path)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	defer fd.Close()
+
+	content, err := io.ReadAll(fd)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	payload, _ := json.Marshal(map[string]string{
+		"content": string(content),
+	})
+
+	output := fmt.Sprintf(markdownPreviewTemplate, file.Name, string(payload))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src * data:; font-src https://cdn.jsdelivr.net")
+	w.Header().Set("Cache-Control", "private")
+	w.Header().Set("Content-Disposition", "inline")
+	_, err = io.Copy(w, bytes.NewReader([]byte(output)))
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	return 0, nil
+}
+
 func rawFileHandler(w http.ResponseWriter, r *http.Request, file *files.FileInfo) (int, error) {
+	if r.URL.Query().Get("inline") == "true" && isMarkdownFile(file.Name) {
+		return serveMarkdownPreview(w, r, file)
+	}
+
 	fd, err := file.Fs.Open(file.Path)
 	if err != nil {
 		return http.StatusInternalServerError, err
