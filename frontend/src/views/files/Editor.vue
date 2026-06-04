@@ -91,7 +91,7 @@ import HeaderBar from "@/components/header/HeaderBar.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useFileStore } from "@/stores/file";
 import { useLayoutStore } from "@/stores/layout";
-import { getEditorTheme } from "@/utils/theme";
+import { getEditorTheme, getTheme } from "@/utils/theme";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
@@ -114,6 +114,59 @@ const fontSize = ref(parseInt(localStorage.getItem("editorFontSize") || "14"));
 const initialContent = ref("");
 
 const editorMode = ref<"edit&preview" | "previewOnly">("previewOnly");
+const themeObserver = ref<MutationObserver | null>(null);
+
+const resolveCherryTheme = () => {
+  const current = getTheme();
+  const isDark = current === "dark";
+  return {
+    themeList: [
+      { className: "default", label: "Default" },
+      { className: "dark", label: "Dark" },
+    ],
+    mainTheme: isDark ? "dark" : "default",
+    codeBlockTheme: isDark ? "monokai" : "default",
+    inlineCodeTheme: isDark ? "black" as const : "red" as const,
+  };
+};
+
+const syncCherryTheme = () => {
+  if (!cherryInstance.value) return;
+  const wrapper = document.querySelector<HTMLElement>(
+    "#cherry-container .cherry"
+  );
+  if (!wrapper) return;
+  const { mainTheme } = resolveCherryTheme();
+  const toRemove: string[] = [];
+  wrapper.classList.forEach((c) => {
+    if (c.startsWith("theme__")) toRemove.push(c);
+  });
+  toRemove.forEach((c) => wrapper.classList.remove(c));
+  wrapper.classList.add(`theme__${mainTheme}`);
+};
+
+const startThemeObserver = () => {
+  stopThemeObserver();
+  themeObserver.value = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.attributeName === "class") {
+        syncCherryTheme();
+        return;
+      }
+    }
+  });
+  themeObserver.value.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+};
+
+const stopThemeObserver = () => {
+  if (themeObserver.value) {
+    themeObserver.value.disconnect();
+    themeObserver.value = null;
+  }
+};
 const isMarkdownFile =
   fileStore.req?.name.endsWith(".md") ||
   fileStore.req?.name.endsWith(".markdown");
@@ -174,11 +227,14 @@ const initCherry = (content: string) => {
       showToolbar: true,
       toc: { defaultModel: "full", updateLocationHash: false },
     },
+    themeSettings: resolveCherryTheme(),
   });
+  startThemeObserver();
   setTimeout(updateFontSize, 0);
 };
 
 const destroyCherry = () => {
+  stopThemeObserver();
   if (cherryInstance.value) {
     try {
       cherryInstance.value.destroy();
