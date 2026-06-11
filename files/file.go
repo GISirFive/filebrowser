@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/afero"
 
 	fberrors "github.com/filebrowser/filebrowser/v2/errors"
+	"github.com/filebrowser/filebrowser/v2/fileutils"
 	"github.com/filebrowser/filebrowser/v2/rules"
 )
 
@@ -343,7 +344,7 @@ func (i *FileInfo) detectSubtitles() {
 		dir = i.currentDir
 	} else {
 		var err error
-		dir, err = afero.ReadDir(i.Fs, parentDir)
+		dir, err = fileutils.ReadDirSafe(i.Fs, parentDir)
 		if err != nil {
 			return
 		}
@@ -364,7 +365,7 @@ func (i *FileInfo) detectSubtitles() {
 }
 
 func (i *FileInfo) loadSubtitles(subsPath, baseName string, recursive bool) {
-	dir, err := afero.ReadDir(i.Fs, subsPath)
+	dir, err := fileutils.ReadDirSafe(i.Fs, subsPath)
 	if err == nil {
 		for _, f := range dir {
 			if isSubtitleMatch(f, "") {
@@ -391,10 +392,17 @@ func (i *FileInfo) addSubtitle(fPath string) {
 }
 
 func (i *FileInfo) readListing(checker rules.Checker, readHeader bool, calcImgRes bool) error {
-	afs := &afero.Afero{Fs: i.Fs}
-	dir, err := afs.ReadDir(i.Path)
+	raw, err := fileutils.ReadDirSafe(i.Fs, i.Path)
 	if err != nil {
 		return err
+	}
+
+	var dir []os.FileInfo
+	for _, f := range raw {
+		fPath := path.Join(i.Path, f.Name())
+		if checker.Check(fPath) {
+			dir = append(dir, f)
+		}
 	}
 
 	listing := &Listing{
@@ -406,10 +414,6 @@ func (i *FileInfo) readListing(checker rules.Checker, readHeader bool, calcImgRe
 	for _, f := range dir {
 		name := f.Name()
 		fPath := path.Join(i.Path, name)
-
-		if !checker.Check(fPath) {
-			continue
-		}
 
 		isSymlink, isInvalidLink := false, false
 		if IsSymlink(f.Mode()) {
