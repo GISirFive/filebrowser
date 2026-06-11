@@ -230,6 +230,14 @@ const initCherry = (content: string) => {
     themeSettings: resolveCherryTheme(),
   });
   startThemeObserver();
+  // Cherry may normalize the content (e.g. trim trailing newlines,
+  // normalize whitespace). Snap the actual value so isClean() compares
+  // against what Cherry really holds, not the raw server response.
+  setTimeout(() => {
+    if (cherryInstance.value) {
+      initialContent.value = cherryInstance.value.getValue();
+    }
+  }, 0);
   setTimeout(updateFontSize, 0);
 };
 
