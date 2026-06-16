@@ -96,7 +96,6 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect } from "
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import { read, copy } from "@/utils/clipboard";
-import { baseURL } from "@/utils/constants";
 
 const $showError = inject<IToastError>("$showError")!;
 
@@ -280,46 +279,7 @@ onMounted(() => {
   const cherryContainer = document.getElementById("cherry-container");
   cherryContainer?.addEventListener("click", handleCherryClick);
 
-  const rawContent = fileStore.req?.content || "";
-  // Rewrite Markdown image references that use relative paths so the
-  // preview pane renders them via the FileBrowser raw API. Without
-  // this, Cherry emits <img src="./foo.png"> which the browser tries
-  // to resolve against the editor route and lands on the file
-  // preview page (404-ish UX) instead of the actual image.
-  const filePath = fileStore.req?.path || route.path;
-  const baseDir = filePath.substring(0, filePath.lastIndexOf("/"));
-  const resolveRelativePath = (raw: string) => {
-    const combined = (baseDir + "/" + raw).split("/");
-    const stack: string[] = [];
-    for (const p of combined) {
-      if (p === "" || p === ".") continue;
-      if (p === "..") stack.pop();
-      else stack.push(p);
-    }
-    const resolved = "/" + stack.join("/");
-    return (
-      baseURL +
-      "/api/raw" +
-      resolved
-        .split("/")
-        .map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg)))
-        .join("/")
-    );
-  };
-  const fileContent = rawContent.replace(
-    /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
-    (match, alt, src) => {
-      // Only rewrite truly-relative paths; leave http(s)/data/absolute alone.
-      if (
-        /^(https?:|data:|blob:|file:|\/)/i.test(src) ||
-        !src.startsWith("./") &&
-          !src.startsWith("../")
-      ) {
-        return match;
-      }
-      return `![${alt}](${resolveRelativePath(src)})`;
-    }
-  );
+  const fileContent = fileStore.req?.content || "";
 
   ace.config.set(
     "basePath",
