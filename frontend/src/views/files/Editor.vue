@@ -230,6 +230,13 @@ const initCherry = (content: string) => {
     },
     themeSettings: resolveCherryTheme(),
   });
+  // Cherry injects style="height: 100%" on the container, which combined
+  // with a viewport-tall ancestor can clip the tail of long documents.
+  // Override to 90% so the preview pane is sized relative to its parent.
+  const cherryContainer = document.getElementById("cherry-container");
+  if (cherryContainer) {
+    cherryContainer.style.height = "90%";
+  }
   startThemeObserver();
   // Cherry may normalize the content (e.g. trim trailing newlines,
   // normalize whitespace). Snap the actual value so isClean() compares
