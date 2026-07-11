@@ -92,6 +92,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useFileStore } from "@/stores/file";
 import { useLayoutStore } from "@/stores/layout";
 import { getEditorTheme, getTheme } from "@/utils/theme";
+import { baseURL } from "@/utils/constants";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
@@ -167,6 +168,73 @@ const stopThemeObserver = () => {
     themeObserver.value = null;
   }
 };
+
+const imageRewriteObserver = ref<MutationObserver | null>(null);
+let isRewritingImages = false;
+
+const rewriteRelativeImages = () => {
+  if (isRewritingImages) return;
+  const container = document.getElementById("cherry-container");
+  if (!container) return;
+
+  const filePath = fileStore.req?.path || route.path;
+  const baseDir = filePath.substring(0, filePath.lastIndexOf("/"));
+  const rawPrefix = baseURL + "/api/raw";
+
+  isRewritingImages = true;
+  try {
+    const imgs = container.querySelectorAll<HTMLImageElement>("img[src]");
+    imgs.forEach((img) => {
+      const src = img.getAttribute("src");
+      if (!src) return;
+      // Already rewritten → skip
+      if (src.startsWith(rawPrefix)) return;
+      // Skip any URL scheme (http/https/file/ftp/data/blob/mailto/...), fragments, root-absolute paths
+      if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("#") || src.startsWith("/")) return;
+
+      const cleaned = src.replace(/^\.\//, "");
+      const combined = (baseDir + "/" + cleaned).split("/");
+      const stack: string[] = [];
+      for (const p of combined) {
+        if (p === "" || p === ".") continue;
+        if (p === "..") stack.pop();
+        else stack.push(p);
+      }
+      const resolved = "/" + stack.join("/");
+      const encoded = resolved
+        .split("/")
+        .map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg)))
+        .join("/");
+      img.setAttribute("src", rawPrefix + encoded);
+    });
+  } finally {
+    isRewritingImages = false;
+  }
+};
+
+const startImageRewriteObserver = () => {
+  stopImageRewriteObserver();
+  const container = document.getElementById("cherry-container");
+  if (!container) return;
+
+  imageRewriteObserver.value = new MutationObserver(() => {
+    rewriteRelativeImages();
+  });
+  imageRewriteObserver.value.observe(container, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["src"],
+  });
+  rewriteRelativeImages();
+};
+
+const stopImageRewriteObserver = () => {
+  if (imageRewriteObserver.value) {
+    imageRewriteObserver.value.disconnect();
+    imageRewriteObserver.value = null;
+  }
+};
 const isMarkdownFile =
   fileStore.req?.name.endsWith(".md") ||
   fileStore.req?.name.endsWith(".markdown");
@@ -237,6 +305,7 @@ const initCherry = (content: string) => {
     cherryContainer.style.height = "90%";
   }
   startThemeObserver();
+  startImageRewriteObserver();
   // Cherry may normalize the content (e.g. trim trailing newlines,
   // normalize whitespace). Snap the actual value so isClean() compares
   // against what Cherry really holds, not the raw server response.
@@ -250,6 +319,7 @@ const initCherry = (content: string) => {
 
 const destroyCherry = () => {
   stopThemeObserver();
+  stopImageRewriteObserver();
   if (cherryInstance.value) {
     try {
       cherryInstance.value.destroy();
