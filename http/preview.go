@@ -62,7 +62,7 @@ func previewHandler(imgSvc ImgService, fileCache FileCache, enableThumbnails, re
 
 		switch file.Type {
 		case "image":
-			return handleImagePreview(w, r, imgSvc, fileCache, file, previewSize, enableThumbnails, resizePreview)
+			return handleImagePreview(w, r, imgSvc, fileCache, file, previewSize, enableThumbnails, resizePreview, d.server.BaseURL)
 		default:
 			return http.StatusNotImplemented, fmt.Errorf("can't create preview for %s type", file.Type)
 		}
@@ -77,16 +77,17 @@ func handleImagePreview(
 	file *files.FileInfo,
 	previewSize PreviewSize,
 	enableThumbnails, resizePreview bool,
+	baseURL string,
 ) (int, error) {
 	if (previewSize == PreviewSizeBig && !resizePreview) ||
 		(previewSize == PreviewSizeThumb && !enableThumbnails) {
-		return rawFileHandler(w, r, file)
+		return rawFileHandler(w, r, baseURL, file)
 	}
 
 	format, err := imgSvc.FormatFromExtension(file.Extension)
 	// Unsupported extensions directly return the raw data
 	if errors.Is(err, img.ErrUnsupportedFormat) || format == img.FormatGif {
-		return rawFileHandler(w, r, file)
+		return rawFileHandler(w, r, baseURL, file)
 	}
 	if err != nil {
 		return errToStatus(err), err

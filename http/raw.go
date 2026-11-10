@@ -107,7 +107,7 @@ var rawHandler = withUser(func(w http.ResponseWriter, r *http.Request, d *data) 
 	}
 
 	if !file.IsDir {
-		return rawFileHandler(w, r, file)
+		return rawFileHandler(w, r, d.server.BaseURL, file)
 	}
 
 	return rawDirHandler(w, r, d, file)
@@ -223,14 +223,14 @@ var markdownPreviewTemplate = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>%s</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cherry-markdown@0.11/dist/cherry-markdown.min.css">
+<link rel="stylesheet" href="%s/api/cherry/cherry-markdown.min.css">
 <style>
 html, body { margin: 0; padding: 0; height: 100%%; }
 </style>
 </head>
 <body>
 <div id="cherry-container"></div>
-<script src="https://cdn.jsdelivr.net/npm/cherry-markdown@0.11/dist/cherry-markdown.min.js"></script>
+<script src="%s/api/cherry/cherry-markdown.core.js"></script>
 <script type="application/json" id="markdown-data">
 %s
 </script>
@@ -287,7 +287,7 @@ html, body { margin: 0; padding: 0; height: 100%%; }
 </body>
 </html>`
 
-func serveMarkdownPreview(w http.ResponseWriter, r *http.Request, file *files.FileInfo) (int, error) {
+func serveMarkdownPreview(w http.ResponseWriter, r *http.Request, baseURL string, file *files.FileInfo) (int, error) {
 	fd, err := file.Fs.Open(file.Path)
 	if err != nil {
 		return http.StatusInternalServerError, err
@@ -303,10 +303,10 @@ func serveMarkdownPreview(w http.ResponseWriter, r *http.Request, file *files.Fi
 		"content": string(content),
 	})
 
-	output := fmt.Sprintf(markdownPreviewTemplate, file.Name, string(payload))
+	output := fmt.Sprintf(markdownPreviewTemplate, file.Name, baseURL, baseURL, string(payload))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src * data:; font-src https://cdn.jsdelivr.net")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'unsafe-inline' 'self'; img-src * data:; font-src 'self'")
 	w.Header().Set("Cache-Control", "private")
 	w.Header().Set("Content-Disposition", "inline")
 	_, err = io.Copy(w, bytes.NewReader([]byte(output)))
@@ -316,9 +316,9 @@ func serveMarkdownPreview(w http.ResponseWriter, r *http.Request, file *files.Fi
 	return 0, nil
 }
 
-func rawFileHandler(w http.ResponseWriter, r *http.Request, file *files.FileInfo) (int, error) {
+func rawFileHandler(w http.ResponseWriter, r *http.Request, baseURL string, file *files.FileInfo) (int, error) {
 	if r.URL.Query().Get("inline") == "true" && isMarkdownFile(file.Name) {
-		return serveMarkdownPreview(w, r, file)
+		return serveMarkdownPreview(w, r, baseURL, file)
 	}
 
 	fd, err := file.Fs.Open(file.Path)

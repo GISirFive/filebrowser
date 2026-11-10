@@ -120,7 +120,7 @@ var publicShareHandler = withHashFile(func(w http.ResponseWriter, r *http.Reques
 var publicDlHandler = withHashFile(func(w http.ResponseWriter, r *http.Request, d *data) (int, error) {
 	file := d.raw.(*files.FileInfo)
 	if !file.IsDir {
-		return rawFileHandler(w, r, file)
+		return rawFileHandler(w, r, d.server.BaseURL, file)
 	}
 
 	return rawDirHandler(w, r, d, file)
