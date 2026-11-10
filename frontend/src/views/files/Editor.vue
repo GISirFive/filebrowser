@@ -97,7 +97,6 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watchEffect } from "
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import { read, copy } from "@/utils/clipboard";
-import { baseURL } from "@/utils/constants";
 
 const $showError = inject<IToastError>("$showError")!;
 
@@ -114,6 +113,7 @@ const editor = ref<Ace.Editor | null>(null);
 const cherryInstance = ref<any>(null);
 const fontSize = ref(parseInt(localStorage.getItem("editorFontSize") || "14"));
 const initialContent = ref("");
+const reverseImageMap = new Map<string, string>();
 
 const editorMode = ref<"edit&preview" | "previewOnly">("previewOnly");
 const themeObserver = ref<MutationObserver | null>(null);
@@ -376,6 +376,7 @@ onMounted(() => {
         .join("/")
     );
   };
+  reverseImageMap.clear();
   const fileContent = rawContent.replace(
     /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
     (match, alt, src) => {
@@ -387,7 +388,9 @@ onMounted(() => {
       ) {
         return match;
       }
-      return `![${alt}](${resolveRelativePath(src)})`;
+      const absoluteUrl = resolveRelativePath(src);
+      reverseImageMap.set(absoluteUrl, src);
+      return `![${alt}](${absoluteUrl})`;
     }
   );
 
@@ -495,7 +498,22 @@ const handlePageChange = (event: BeforeUnloadEvent) => {
 
 const getContent = () => {
   if (isMarkdownFile && cherryInstance.value) {
-    return cherryInstance.value.getValue();
+    let value = cherryInstance.value.getValue();
+    // Reverse the relative-path rewrite so we don't write absolute
+    // API URLs back to the source file on save.
+    if (reverseImageMap.size > 0) {
+      value = value.replace(
+        /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
+        (m: string, alt: string, src: string) => {
+          const original = reverseImageMap.get(src);
+          if (original) {
+            return `![${alt}](${original})`;
+          }
+          return m;
+        }
+      );
+    }
+    return value;
   }
   return editor.value?.getValue() || "";
 };
