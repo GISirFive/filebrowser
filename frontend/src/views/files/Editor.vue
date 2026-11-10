@@ -79,7 +79,7 @@
 import { files as api } from "@/api";
 import buttons from "@/utils/buttons";
 import url from "@/utils/url";
-import ace, { Ace, version as ace_version } from "ace-builds";
+import ace, { Ace } from "ace-builds";
 import "ace-builds/src-noconflict/ext-language_tools";
 import modelist from "ace-builds/src-noconflict/ext-modelist";
 import Cherry from "cherry-markdown";
@@ -394,10 +394,9 @@ onMounted(() => {
     }
   );
 
-  ace.config.set(
-    "basePath",
-    `https://cdn.jsdelivr.net/npm/ace-builds@${ace_version}/src-min-noconflict/`
-  );
+  // Serve ace themes/modes/extensions from the embedded frontend assets
+  // (frontend/public/ace/) so the editor works fully offline.
+  ace.config.set("basePath", `${baseURL}/static/ace/`);
 
   if (!layoutStore.loading) {
     initEditor(fileContent);
